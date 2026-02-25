@@ -1,650 +1,241 @@
-<!DOCTYPE html>
-<html lang="da">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Ingen Indkøb">
-<meta name="theme-color" content="#0d0d12">
-<title>Ingen Indkøb</title>
+import React, { useState, useEffect } from 'react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, onAuthStateChanged, signInAnonymously, signInWithCustomToken } from 'firebase/auth';
+import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, Timestamp } from 'firebase/firestore';
+import { PiggyBank, History, Trash2, PlusCircle, TrendingUp, Wallet, Calendar } from 'lucide-react';
 
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+// Firebase configuration
+const firebaseConfig = JSON.parse(__firebase_config);
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'savings-tracker-unlimited';
 
-<style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+const STANDARD_DAILY_BUDGET = 100;
 
-  :root {
-    --bg: #0d0d12;
-    --card: #ffffff08;
-    --border: #ffffff10;
-    --text: #ffffff;
-    --muted: #ffffff50;
-    --dim: #ffffff25;
-    --level-color: #7ecf8e;
-  }
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [spentAmount, setSpentAmount] = useState('');
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [entries, setEntries] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [toast, setToast] = useState(null);
 
-  html, body {
-    background: var(--bg);
-    color: var(--text);
-    font-family: 'DM Serif Display', Georgia, serif;
-    min-height: 100vh;
-    min-height: -webkit-fill-available;
-    overscroll-behavior: none;
-    -webkit-tap-highlight-color: transparent;
-  }
+  // Auth initialization
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) {
+        console.error("Auth error", err);
+      }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, (u) => setUser(u));
+    return () => unsubscribe();
+  }, []);
 
-  .app {
-    min-height: 100vh;
-    min-height: -webkit-fill-available;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: flex-start;
-    padding: env(safe-area-inset-top, 48px) 20px env(safe-area-inset-bottom, 24px);
-    padding-top: max(env(safe-area-inset-top), 48px);
-    overflow-y: auto;
-    position: relative;
-  }
+  // Data listener
+  useEffect(() => {
+    if (!user) return;
 
-  .glow {
-    position: fixed;
-    top: 20%;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 500px;
-    height: 500px;
-    border-radius: 50%;
-    background: radial-gradient(circle, var(--level-glow, #7ecf8e22) 0%, transparent 70%);
-    pointer-events: none;
-    transition: background 1.2s ease;
-    z-index: 0;
-  }
-
-  .content {
-    width: 100%;
-    max-width: 400px;
-    position: relative;
-    z-index: 1;
-  }
-
-  /* Header */
-  .header {
-    text-align: center;
-    margin-bottom: 28px;
-    animation: slide-up 0.5s ease;
-  }
-  .header-label {
-    color: var(--muted);
-    font-family: 'DM Mono', monospace;
-    font-size: 10px;
-    letter-spacing: 4px;
-    text-transform: uppercase;
-    margin-bottom: 8px;
-  }
-  .header h1 {
-    font-size: 34px;
-    font-weight: 400;
-    line-height: 1.15;
-  }
-  .header h1 em { font-style: italic; }
-
-  /* Level card */
-  .level-card {
-    background: var(--card);
-    border: 1px solid var(--level-border, #7ecf8e44);
-    border-radius: 16px;
-    padding: 16px 18px;
-    margin-bottom: 12px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    transition: border-color 1s ease;
-    animation: slide-up 0.55s ease;
-  }
-  .level-emoji {
-    font-size: 30px;
-    animation: float 3s ease-in-out infinite;
-    flex-shrink: 0;
-  }
-  .level-info { flex: 1; min-width: 0; }
-  .level-top {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 6px;
-  }
-  .level-name {
-    font-family: 'DM Mono', monospace;
-    font-size: 11px;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    color: var(--level-color);
-    transition: color 1s ease;
-  }
-  .level-next {
-    font-family: 'DM Mono', monospace;
-    font-size: 9px;
-    color: var(--dim);
-    white-space: nowrap;
-  }
-  .progress-bar {
-    height: 4px;
-    background: #ffffff10;
-    border-radius: 2px;
-    overflow: hidden;
-  }
-  .progress-fill {
-    height: 100%;
-    border-radius: 2px;
-    background: linear-gradient(90deg, var(--level-color-soft, #7ecf8e88), var(--level-color));
-    transition: width 0.8s ease, background 1s ease;
-  }
-
-  /* Stats */
-  .stats {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    margin-bottom: 12px;
-    animation: slide-up 0.6s ease;
-  }
-  .stat-card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 18px 14px;
-    text-align: center;
-  }
-  .stat-value {
-    font-size: 38px;
-    font-weight: 400;
-    line-height: 1;
-    color: var(--text);
-  }
-  .stat-value.green { color: #7ecf8e; font-size: 26px; }
-  .stat-label {
-    font-family: 'DM Mono', monospace;
-    font-size: 9px;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    color: var(--muted);
-    margin-top: 4px;
-  }
-
-  /* Budget */
-  .budget-row {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 14px 18px;
-    margin-bottom: 20px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    animation: slide-up 0.65s ease;
-  }
-  .budget-label {
-    font-family: 'DM Mono', monospace;
-    font-size: 10px;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    color: var(--muted);
-  }
-  .budget-value {
-    font-family: 'DM Mono', monospace;
-    font-size: 16px;
-    color: var(--text);
-    background: none;
-    border: none;
-    cursor: pointer;
-    padding: 0;
-  }
-  .budget-edit {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-  }
-  .budget-input {
-    background: #ffffff15;
-    border: 1px solid #ffffff30;
-    border-radius: 8px;
-    padding: 6px 10px;
-    color: var(--text);
-    font-family: 'DM Mono', monospace;
-    font-size: 14px;
-    width: 90px;
-    outline: none;
-    -webkit-appearance: none;
-  }
-  .budget-save {
-    background: #7ecf8e22;
-    border: 1px solid #7ecf8e55;
-    color: #7ecf8e;
-    border-radius: 8px;
-    padding: 6px 12px;
-    cursor: pointer;
-    font-family: 'DM Mono', monospace;
-    font-size: 11px;
-  }
-
-  /* Check-in button */
-  .checkin-wrap {
-    display: flex;
-    justify-content: center;
-    position: relative;
-    margin-bottom: 12px;
-    animation: slide-up 0.7s ease;
-  }
-  .pulse-ring {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 100px;
-    height: 100px;
-    border-radius: 50%;
-    border: 2px solid var(--level-color);
-    animation: pulse-ring 2s ease-out infinite;
-    transition: border-color 1s ease;
-  }
-  .checkin-btn {
-    width: 190px;
-    height: 190px;
-    border-radius: 50%;
-    border: 2px solid var(--level-color);
-    background: radial-gradient(circle, var(--level-color-bg, #7ecf8e40), var(--level-color-bg2, #7ecf8e15));
-    cursor: pointer;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    transition: all 0.3s ease;
-    box-shadow: 0 0 40px var(--level-glow2, #7ecf8e30);
-    -webkit-tap-highlight-color: transparent;
-    position: relative;
-    z-index: 1;
-  }
-  .checkin-btn.done {
-    border-color: var(--level-color-dim, #7ecf8e40);
-    background: radial-gradient(circle, var(--level-color-done-bg, #7ecf8e20), var(--level-color-done-bg2, #7ecf8e08));
-    box-shadow: none;
-    cursor: default;
-  }
-  .checkin-btn:active:not(.done) { transform: scale(0.96); }
-  .btn-emoji { font-size: 38px; }
-  .btn-text {
-    font-family: 'DM Mono', monospace;
-    font-size: 10px;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    color: var(--muted);
-  }
-  .btn-sub {
-    font-family: 'DM Mono', monospace;
-    font-size: 8px;
-    color: var(--dim);
-    letter-spacing: 1px;
-  }
-
-  .tomorrow-msg {
-    text-align: center;
-    font-family: 'DM Mono', monospace;
-    font-size: 10px;
-    letter-spacing: 1px;
-    color: var(--dim);
-    margin-bottom: 16px;
-  }
-
-  /* Levels list */
-  .levels-card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 16px 18px;
-    margin-bottom: 12px;
-    animation: slide-up 0.75s ease;
-  }
-  .levels-title {
-    font-family: 'DM Mono', monospace;
-    font-size: 9px;
-    letter-spacing: 3px;
-    text-transform: uppercase;
-    color: var(--dim);
-    margin-bottom: 12px;
-  }
-  .level-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 8px;
-    transition: opacity 0.3s;
-  }
-  .level-row.locked { opacity: 0.25; }
-  .level-row-emoji { font-size: 16px; }
-  .level-row-name {
-    font-family: 'DM Mono', monospace;
-    font-size: 11px;
-    flex: 1;
-  }
-  .level-row-range {
-    font-family: 'DM Mono', monospace;
-    font-size: 9px;
-    color: var(--dim);
-  }
-
-  /* Reset */
-  .reset-btn {
-    width: 100%;
-    padding: 12px;
-    background: none;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    color: var(--dim);
-    font-family: 'DM Mono', monospace;
-    font-size: 10px;
-    cursor: pointer;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    transition: color 0.2s;
-    margin-bottom: 8px;
-    animation: slide-up 0.8s ease;
-  }
-  .reset-btn:active { color: #f04080; }
-
-  /* Install hint */
-  .install-hint {
-    text-align: center;
-    font-family: 'DM Mono', monospace;
-    font-size: 9px;
-    color: var(--dim);
-    letter-spacing: 1px;
-    padding-bottom: 8px;
-  }
-
-  /* Confetti */
-  .confetti-piece {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    pointer-events: none;
-    z-index: 999;
-    animation: confetti-fly 1.8s ease-out forwards;
-  }
-
-  /* Animations */
-  @keyframes float {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-7px); }
-  }
-  @keyframes pulse-ring {
-    0% { transform: translate(-50%, -50%) scale(1); opacity: 0.6; }
-    100% { transform: translate(-50%, -50%) scale(1.45); opacity: 0; }
-  }
-  @keyframes slide-up {
-    from { opacity: 0; transform: translateY(18px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-  @keyframes pop {
-    0% { transform: scale(1); }
-    50% { transform: scale(1.1); }
-    100% { transform: scale(1); }
-  }
-  @keyframes confetti-fly {
-    to { opacity: 0; }
-  }
-</style>
-</head>
-<body>
-
-<div class="glow" id="glow"></div>
-
-<div class="app">
-  <div class="content">
-    <div class="header">
-      <p class="header-label">Streak Tracker</p>
-      <h1>Ingen Indkøb,<br><em>Flere Penge</em></h1>
-    </div>
-
-    <div class="level-card" id="levelCard">
-      <div class="level-emoji" id="levelEmoji">🌱</div>
-      <div class="level-info">
-        <div class="level-top">
-          <span class="level-name" id="levelName">Nybegynder</span>
-          <span class="level-next" id="levelNext"></span>
-        </div>
-        <div class="progress-bar">
-          <div class="progress-fill" id="progressFill" style="width:0%"></div>
-        </div>
-      </div>
-    </div>
-
-    <div class="stats">
-      <div class="stat-card">
-        <div class="stat-value" id="daysVal">0</div>
-        <div class="stat-label">Dage</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-value green" id="savedVal">0</div>
-        <div class="stat-label">kr. sparet</div>
-      </div>
-    </div>
-
-    <div class="budget-row">
-      <span class="budget-label">Dagligt Budget</span>
-      <div id="budgetDisplay">
-        <button class="budget-value" id="budgetBtn" onclick="startEditBudget()"></button>
-      </div>
-    </div>
-
-    <div class="checkin-wrap">
-      <div class="pulse-ring" id="pulseRing"></div>
-      <button class="checkin-btn" id="checkinBtn" onclick="handleCheckIn()">
-        <span class="btn-emoji" id="btnEmoji">🛒</span>
-        <span class="btn-text" id="btnText">Ingen indkøb</span>
-        <span class="btn-sub" id="btnSub"></span>
-      </button>
-    </div>
-
-    <p class="tomorrow-msg" id="tomorrowMsg" style="display:none">Kom igen i morgen 🌙</p>
-
-    <div class="levels-card">
-      <p class="levels-title">Level Guide</p>
-      <div id="levelsList"></div>
-    </div>
-
-    <button class="reset-btn" onclick="handleReset()">Nulstil fremskridt</button>
-
-    <p class="install-hint">Safari → Del → Føj til hjemmeskærm</p>
-  </div>
-</div>
-
-<script>
-const LEVELS = [
-  { name: "Nybegynder",    min: 0,  max: 2,        emoji: "🌱", color: "#7ecf8e" },
-  { name: "Sparsommelig",  min: 3,  max: 6,        emoji: "💰", color: "#f0c040" },
-  { name: "Disciplineret", min: 7,  max: 13,       emoji: "🔥", color: "#f07040" },
-  { name: "Mester",        min: 14, max: 29,       emoji: "⚡", color: "#a070f0" },
-  { name: "Legende",       min: 30, max: Infinity, emoji: "👑", color: "#f04080" },
-];
-
-function loadState() {
-  try {
-    const s = localStorage.getItem("shoptracker_v2");
-    return s ? JSON.parse(s) : { days: 0, dailyBudget: 150, lastChecked: null, totalSaved: 0 };
-  } catch { return { days: 0, dailyBudget: 150, lastChecked: null, totalSaved: 0 }; }
-}
-
-function saveState(s) {
-  try { localStorage.setItem("shoptracker_v2", JSON.stringify(s)); } catch {}
-}
-
-let state = loadState();
-
-function getLevel(days) {
-  return LEVELS.find(l => days >= l.min && days <= l.max) || LEVELS[0];
-}
-function getNextLevel(days) {
-  const idx = LEVELS.findIndex(l => days >= l.min && days <= l.max);
-  return idx < LEVELS.length - 1 ? LEVELS[idx + 1] : null;
-}
-
-function hex(color, alpha) {
-  return color + Math.round(alpha * 255).toString(16).padStart(2, "0");
-}
-
-function render() {
-  const { days, dailyBudget, lastChecked, totalSaved } = state;
-  const today = new Date().toDateString();
-  const done = lastChecked === today;
-  const level = getLevel(days);
-  const next = getNextLevel(days);
-  const progress = next ? ((days - level.min) / (next.min - level.min)) * 100 : 100;
-
-  // CSS vars for color
-  document.documentElement.style.setProperty("--level-color", level.color);
-  document.documentElement.style.setProperty("--level-glow", hex(level.color, 0.13));
-  document.documentElement.style.setProperty("--level-glow2", hex(level.color, 0.19));
-  document.documentElement.style.setProperty("--level-border", hex(level.color, 0.27));
-  document.documentElement.style.setProperty("--level-color-soft", hex(level.color, 0.53));
-  document.documentElement.style.setProperty("--level-color-bg", hex(level.color, 0.25));
-  document.documentElement.style.setProperty("--level-color-bg2", hex(level.color, 0.08));
-  document.documentElement.style.setProperty("--level-color-done-bg", hex(level.color, 0.12));
-  document.documentElement.style.setProperty("--level-color-done-bg2", hex(level.color, 0.04));
-  document.documentElement.style.setProperty("--level-color-dim", hex(level.color, 0.25));
-
-  // Level card
-  document.getElementById("levelEmoji").textContent = level.emoji;
-  document.getElementById("levelName").textContent = level.name;
-  document.getElementById("levelNext").textContent = next ? `→ ${next.name} om ${next.min - days} dag${next.min - days !== 1 ? "e" : ""}` : "Max niveau! 🎉";
-  document.getElementById("progressFill").style.width = progress + "%";
-
-  // Stats
-  document.getElementById("daysVal").textContent = days;
-  document.getElementById("savedVal").textContent = totalSaved.toLocaleString("da-DK");
-
-  // Budget
-  document.getElementById("budgetBtn").textContent = dailyBudget.toLocaleString("da-DK") + " kr ✎";
-
-  // Check-in btn
-  const btn = document.getElementById("checkinBtn");
-  if (done) {
-    btn.classList.add("done");
-    document.getElementById("btnEmoji").textContent = "✅";
-    document.getElementById("btnText").textContent = "Registreret";
-    document.getElementById("btnSub").textContent = "i dag";
-    document.getElementById("pulseRing").style.display = "none";
-    document.getElementById("tomorrowMsg").style.display = "block";
-  } else {
-    btn.classList.remove("done");
-    document.getElementById("btnEmoji").textContent = "🛒";
-    document.getElementById("btnText").textContent = "Ingen indkøb";
-    document.getElementById("btnSub").textContent = "";
-    document.getElementById("pulseRing").style.display = "block";
-    document.getElementById("tomorrowMsg").style.display = "none";
-  }
-
-  // Levels list
-  const list = document.getElementById("levelsList");
-  list.innerHTML = LEVELS.map(l => `
-    <div class="level-row ${days >= l.min ? "" : "locked"}">
-      <span class="level-row-emoji">${l.emoji}</span>
-      <span class="level-row-name" style="color:${l.color}">${l.name}</span>
-      <span class="level-row-range">${l.max === Infinity ? l.min + "+ dage" : l.min + "–" + l.max + " dage"}</span>
-    </div>
-  `).join("");
-}
-
-function spawnConfetti() {
-  const colors = ["#f04080","#f0c040","#7ecf8e","#a070f0","#f07040","#40c0f0"];
-  for (let i = 0; i < 20; i++) {
-    const el = document.createElement("div");
-    el.className = "confetti-piece";
-    const dx = (Math.random() - 0.5) * 320;
-    const dy = -(Math.random() * 300 + 120);
-    el.style.cssText = `
-      background: ${colors[i % colors.length]};
-      border-radius: ${i % 2 === 0 ? "50%" : "2px"};
-      animation-duration: ${1.4 + Math.random() * 0.8}s;
-      transform: translate(-50%, -50%);
-    `;
-    el.animate([
-      { transform: "translate(-50%, -50%) rotate(0deg)", opacity: 1 },
-      { transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) rotate(${720 * (Math.random() > 0.5 ? 1 : -1)}deg)`, opacity: 0 }
-    ], { duration: 1600 + Math.random() * 600, easing: "ease-out", fill: "forwards" });
-    document.body.appendChild(el);
-    setTimeout(() => el.remove(), 2400);
-  }
-}
-
-function handleCheckIn() {
-  const today = new Date().toDateString();
-  if (state.lastChecked === today) return;
-  state.days += 1;
-  state.lastChecked = today;
-  state.totalSaved += state.dailyBudget;
-  saveState(state);
-  spawnConfetti();
-  const btn = document.getElementById("checkinBtn");
-  btn.animate([{ transform: "scale(1)" }, { transform: "scale(1.1)" }, { transform: "scale(1)" }], { duration: 400 });
-  render();
-}
-
-function startEditBudget() {
-  const display = document.getElementById("budgetDisplay");
-  display.innerHTML = `
-    <div class="budget-edit">
-      <input class="budget-input" type="number" id="budgetInput" value="${state.dailyBudget}" inputmode="decimal">
-      <button class="budget-save" onclick="saveBudget()">OK</button>
-    </div>
-  `;
-  const input = document.getElementById("budgetInput");
-  input.focus();
-  input.select();
-  input.addEventListener("keydown", e => { if (e.key === "Enter") saveBudget(); });
-}
-
-function saveBudget() {
-  const val = parseFloat(document.getElementById("budgetInput")?.value);
-  if (!isNaN(val) && val > 0) {
-    state.dailyBudget = val;
-    saveState(state);
-  }
-  const display = document.getElementById("budgetDisplay");
-  display.innerHTML = `<button class="budget-value" id="budgetBtn" onclick="startEditBudget()"></button>`;
-  render();
-}
-
-function handleReset() {
-  if (!confirm("Nulstil alle dine fremskridt?")) return;
-  state = { days: 0, dailyBudget: state.dailyBudget, lastChecked: null, totalSaved: 0 };
-  saveState(state);
-  render();
-}
-
-render();
-
-// Register service worker for offline/PWA
-if ("serviceWorker" in navigator) {
-  const swCode = `
-    const CACHE = "ingen-indkob-v1";
-    self.addEventListener("install", e => {
-      e.waitUntil(caches.open(CACHE).then(c => c.addAll(["/ingen-indkob.html"])));
-      self.skipWaiting();
+    const q = collection(db, 'artifacts', appId, 'users', user.uid, 'savings');
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        date: doc.data().date?.toDate() || new Date()
+      }));
+      
+      // Rule 2: Sort in memory
+      const sorted = data.sort((a, b) => b.date - a.date);
+      setEntries(sorted);
+      setLoading(false);
+    }, (err) => {
+      console.error("Firestore error", err);
+      setLoading(false);
     });
-    self.addEventListener("fetch", e => {
-      e.respondWith(caches.match(e.request).then(r => r || fetch(e.request)));
-    });
-  `;
-  const blob = new Blob([swCode], { type: "application/javascript" });
-  const swUrl = URL.createObjectURL(blob);
-  navigator.serviceWorker.register(swUrl).catch(() => {});
+
+    return () => unsubscribe();
+  }, [user]);
+
+  const showToast = (msg) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    if (!user) return;
+
+    const spent = parseFloat(spentAmount) || 0;
+    const saved = STANDARD_DAILY_BUDGET - spent;
+    
+    // Create correct date object from picker
+    const [year, month, day] = selectedDate.split('-').map(Number);
+    const dateObj = new Date(year, month - 1, day, 12, 0, 0);
+
+    try {
+      await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'savings'), {
+        spent,
+        saved,
+        date: Timestamp.fromDate(dateObj),
+        createdAt: Timestamp.now()
+      });
+      setSpentAmount('');
+      showToast(`Indberettet for ${day}/${month}`);
+    } catch (err) {
+      showToast("Kunne ikke gemme");
+    }
+  };
+
+  const removeEntry = async (id) => {
+    if (!user) return;
+    try {
+      await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'savings', id));
+    } catch (err) {
+      showToast("Fejl ved sletning");
+    }
+  };
+
+  const totalSaved = entries.reduce((acc, curr) => acc + curr.saved, 0);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-slate-50 text-emerald-600 font-bold uppercase tracking-widest">
+        Henter data...
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans">
+      <div className="max-w-md mx-auto space-y-6">
+        
+        {/* Header Section */}
+        <header className="flex items-center justify-between bg-white p-6 rounded-[2rem] shadow-sm">
+          <div>
+            <h1 className="text-2xl font-black text-slate-800 tracking-tight">Sparekassen</h1>
+            <p className="text-xs font-bold text-emerald-600 uppercase">Mål: 100 kr/dag</p>
+          </div>
+          <div className="bg-emerald-50 p-4 rounded-2xl">
+            <PiggyBank className="text-emerald-600" size={28} />
+          </div>
+        </header>
+
+        {/* Big Number Card */}
+        <div className="bg-slate-900 text-white p-8 rounded-[2.5rem] shadow-2xl relative overflow-hidden">
+          <div className="relative z-10">
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Total Opsparing</span>
+            <div className="flex items-baseline gap-2 mt-1">
+              <h2 className="text-5xl font-black">{totalSaved.toFixed(0)}</h2>
+              <span className="text-xl font-medium text-emerald-400">kr.</span>
+            </div>
+          </div>
+          <TrendingUp size={120} className="absolute -right-6 -bottom-6 text-white opacity-5 rotate-12" />
+        </div>
+
+        {/* Flexible Input Form */}
+        <section className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100">
+          <div className="flex items-center gap-2 mb-6">
+            <PlusCircle size={18} className="text-emerald-500" />
+            <h3 className="font-bold text-slate-700">Indberet dag</h3>
+          </div>
+
+          <form onSubmit={handleSave} className="space-y-4">
+            <div className="space-y-4">
+              {/* Date Input - No limits */}
+              <div className="relative">
+                <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                <input 
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  className="w-full bg-slate-50 border-none rounded-2xl py-4 pl-12 pr-4 font-bold text-slate-600 focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+                />
+              </div>
+
+              {/* Amount Input */}
+              <div className="relative">
+                <input 
+                  type="number"
+                  inputMode="decimal"
+                  placeholder="Dagens forbrug (0 = sparet 100)"
+                  value={spentAmount}
+                  onChange={(e) => setSpentAmount(e.target.value)}
+                  className="w-full bg-slate-50 border-none rounded-2xl py-4 px-6 text-lg font-bold placeholder:text-slate-300 focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+                />
+                <span className="absolute right-6 top-1/2 -translate-y-1/2 font-bold text-slate-300">kr.</span>
+              </div>
+            </div>
+
+            <button 
+              type="submit"
+              className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-black py-5 rounded-2xl shadow-lg shadow-emerald-200 transition-all active:scale-[0.97]"
+            >
+              GEM INDBERETNING
+            </button>
+          </form>
+        </section>
+
+        {/* Scrollable History */}
+        <section className="space-y-4">
+          <div className="flex items-center justify-between px-2">
+            <div className="flex items-center gap-2">
+              <History size={18} className="text-slate-400" />
+              <h3 className="font-bold text-slate-800 uppercase text-xs tracking-widest">Historik</h3>
+            </div>
+            <span className="text-[10px] font-bold text-slate-400">{entries.length} dage logget</span>
+          </div>
+
+          <div className="space-y-3 pb-10">
+            {entries.length === 0 ? (
+              <div className="bg-white/50 border-2 border-dashed border-slate-200 rounded-3xl p-10 text-center">
+                <p className="text-slate-400 font-bold text-sm">Ingen historik endnu</p>
+              </div>
+            ) : (
+              entries.map((entry) => (
+                <div key={entry.id} className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between group hover:border-emerald-100 transition-all">
+                  <div className="flex items-center gap-4">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black text-xs ${entry.saved >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+                      {entry.saved >= 0 ? '✓' : '!'}
+                    </div>
+                    <div>
+                      <p className="text-xs font-black text-slate-400 uppercase tracking-tighter">
+                        {entry.date.toLocaleDateString('da-DK', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
+                      </p>
+                      <div className="flex items-baseline gap-1">
+                        <span className={`font-bold text-lg ${entry.saved >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                          {entry.saved > 0 ? '+' : ''}{entry.saved.toFixed(0)} kr.
+                        </span>
+                        <span className="text-[10px] text-slate-300 font-bold">Logget: {entry.spent} kr.</span>
+                      </div>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => removeEntry(entry.id)}
+                    className="p-2 text-slate-200 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+      </div>
+
+      {/* Toast Notification */}
+      {toast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-8 py-4 rounded-2xl shadow-2xl font-black text-xs tracking-widest animate-in fade-in slide-in-from-bottom-4">
+          {toast.toUpperCase()}
+        </div>
+      )}
+    </div>
+  );
 }
-</script>
-</body>
-</html>
+
