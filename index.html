@@ -1,0 +1,264 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2867
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 <!DOCTYPE html>\
+<html lang="da">\
+<head>\
+    <meta charset="UTF-8">\
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">\
+    <title>Sparekassen</title>\
+    <script src="https://cdn.tailwindcss.com"></script>\
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>\
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>\
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>\
+    <script src="https://unpkg.com/lucide@latest"></script>\
+    <style>\
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');\
+        body \{ \
+            font-family: 'Inter', sans-serif; \
+            -webkit-tap-highlight-color: transparent;\
+        \}\
+        input[type="date"]::-webkit-calendar-picker-indicator \{\
+            filter: invert(0.5);\
+        \}\
+    </style>\
+</head>\
+<body class="bg-slate-50">\
+    <div id="root"></div>\
+\
+    <!-- Vi tilf\'f8jer data-type="module" s\'e5 Babel forst\'e5r import/export korrekt i browseren -->\
+    <script type="text/babel" data-type="module">\
+        const \{ useState, useEffect \} = React;\
+        \
+        // Firebase imports via CDN\
+        import \{ initializeApp \} from "https://www.gstatic.com/firebasejs/11.1.0/firebase-app.js";\
+        import \{ getAuth, onAuthStateChanged, signInAnonymously, signInWithCustomToken \} from "https://www.gstatic.com/firebasejs/11.1.0/firebase-auth.js";\
+        import \{ getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, Timestamp \} from "https://www.gstatic.com/firebasejs/11.1.0/firebase-firestore.js";\
+\
+        // Konfiguration - sikrer fallback hvis variabler ikke er sat endnu\
+        const firebaseConfig = window.__firebase_config ? JSON.parse(window.__firebase_config) : \{\};\
+        const app = initializeApp(firebaseConfig);\
+        const auth = getAuth(app);\
+        const db = getFirestore(app);\
+        const appId = window.__app_id || 'savings-tracker-unlimited';\
+\
+        const STANDARD_DAILY_BUDGET = 100;\
+\
+        function App() \{\
+            const [user, setUser] = useState(null);\
+            const [spentAmount, setSpentAmount] = useState('');\
+            const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);\
+            const [entries, setEntries] = useState([]);\
+            const [loading, setLoading] = useState(true);\
+            const [toast, setToast] = useState(null);\
+\
+            // H\'e5ndtering af login\
+            useEffect(() => \{\
+                const initAuth = async () => \{\
+                    try \{\
+                        if (window.__initial_auth_token) \{\
+                            await signInWithCustomToken(auth, window.__initial_auth_token);\
+                        \} else \{\
+                            await signInAnonymously(auth);\
+                        \}\
+                    \} catch (err) \{\
+                        console.error("Auth fejl:", err);\
+                    \}\
+                \};\
+                initAuth();\
+                const unsubscribe = onAuthStateChanged(auth, (u) => \{\
+                    setUser(u);\
+                \});\
+                return () => unsubscribe();\
+            \}, []);\
+\
+            // Hentning af data fra Firestore\
+            useEffect(() => \{\
+                if (!user) return;\
+                \
+                const q = collection(db, 'artifacts', appId, 'users', user.uid, 'savings');\
+                const unsubscribe = onSnapshot(q, (snapshot) => \{\
+                    const data = snapshot.docs.map(doc => (\{\
+                        id: doc.id,\
+                        ...doc.data(),\
+                        date: doc.data().date?.toDate() || new Date()\
+                    \}));\
+                    // Sorterer efter dato (nyeste \'f8verst)\
+                    setEntries(data.sort((a, b) => b.date - a.date));\
+                    setLoading(false);\
+                    // Genindl\'e6s ikoner efter render\
+                    setTimeout(() => lucide.createIcons(), 100);\
+                \}, (err) => \{\
+                    console.error("Firestore fejl:", err);\
+                    setLoading(false);\
+                \});\
+\
+                return () => unsubscribe();\
+            \}, [user]);\
+\
+            const showToast = (msg) => \{\
+                setToast(msg);\
+                setTimeout(() => setToast(null), 3000);\
+            \};\
+\
+            const handleSave = async (e) => \{\
+                e.preventDefault();\
+                if (!user) return;\
+\
+                const spent = parseFloat(spentAmount) || 0;\
+                const [y, m, d] = selectedDate.split('-').map(Number);\
+                const dateObj = new Date(y, m - 1, d, 12, 0, 0);\
+\
+                try \{\
+                    await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'savings'), \{\
+                        spent,\
+                        saved: STANDARD_DAILY_BUDGET - spent,\
+                        date: Timestamp.fromDate(dateObj)\
+                    \});\
+                    setSpentAmount('');\
+                    showToast(`Gemt for $\{d\}/$\{m\}`);\
+                \} catch (err) \{ \
+                    showToast("Fejl ved gemning"); \
+                \}\
+            \};\
+\
+            const removeEntry = async (id) => \{\
+                if (!user) return;\
+                try \{\
+                    await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'savings', id));\
+                    showToast("Slettet");\
+                \} catch (err) \{\
+                    showToast("Kunne ikke slette");\
+                \}\
+            \};\
+\
+            const totalSaved = entries.reduce((acc, curr) => acc + curr.saved, 0);\
+\
+            if (loading) \{\
+                return (\
+                    <div className="flex h-screen items-center justify-center bg-slate-50">\
+                        <div className="text-emerald-600 font-black animate-pulse tracking-tighter text-xl">\
+                            HENTER DATA...\
+                        </div>\
+                    </div>\
+                );\
+            \}\
+\
+            return (\
+                <div className="max-w-md mx-auto p-4 md:p-8 space-y-6 min-h-screen pb-20">\
+                    <header className="flex items-center justify-between bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100">\
+                        <div>\
+                            <h1 className="text-2xl font-black text-slate-800 tracking-tight">Sparekassen</h1>\
+                            <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">M\'e5l: 100 kr/dag</p>\
+                        </div>\
+                        <div className="bg-emerald-50 p-3 rounded-2xl">\
+                            <i data-lucide="piggy-bank" className="text-emerald-600 w-8 h-8"></i>\
+                        </div>\
+                    </header>\
+\
+                    <div className="bg-slate-900 text-white p-8 rounded-[2.5rem] shadow-2xl relative overflow-hidden">\
+                        <div className="relative z-10">\
+                            <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Total Opsparing</span>\
+                            <div className="flex items-baseline gap-2 mt-1">\
+                                <h2 className="text-5xl font-black">\{totalSaved.toFixed(0)\}</h2>\
+                                <span className="text-xl font-medium text-emerald-400">kr.</span>\
+                            </div>\
+                        </div>\
+                        <i data-lucide="trending-up" className="absolute -right-6 -bottom-6 w-32 h-32 text-white opacity-5 rotate-12"></i>\
+                    </div>\
+\
+                    <form onSubmit=\{handleSave\} className="bg-white p-6 rounded-[2rem] shadow-sm space-y-4 border border-slate-100">\
+                        <div className="space-y-1">\
+                            <label className="text-[10px] font-black text-slate-400 uppercase ml-2">V\'e6lg dato</label>\
+                            <input \
+                                type="date" \
+                                value=\{selectedDate\} \
+                                onChange=\{e => setSelectedDate(e.target.value)\} \
+                                className="w-full bg-slate-50 rounded-2xl py-4 px-6 font-bold text-slate-700 outline-none focus:ring-2 focus:ring-emerald-500 transition-all border-none" \
+                            />\
+                        </div>\
+                        <div className="space-y-1">\
+                            <label className="text-[10px] font-black text-slate-400 uppercase ml-2">Dagens forbrug</label>\
+                            <div className="relative">\
+                                <input \
+                                    type="number" \
+                                    inputMode="decimal"\
+                                    placeholder="0 (sparet 100)" \
+                                    value=\{spentAmount\} \
+                                    onChange=\{e => setSpentAmount(e.target.value)\} \
+                                    className="w-full bg-slate-50 rounded-2xl py-4 px-6 text-lg font-bold outline-none focus:ring-2 focus:ring-emerald-500 transition-all border-none" \
+                                />\
+                                <span className="absolute right-6 top-1/2 -translate-y-1/2 font-bold text-slate-300">kr.</span>\
+                            </div>\
+                        </div>\
+                        <button \
+                            type="submit" \
+                            className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-black py-5 rounded-2xl shadow-lg shadow-emerald-100 active:scale-95 transition-all mt-2"\
+                        >\
+                            GEM INDBERETNING\
+                        </button>\
+                    </form>\
+\
+                    <div className="space-y-4">\
+                        <div className="flex justify-between items-center px-2">\
+                            <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest">Historik</h3>\
+                            <span className="text-[10px] font-bold text-slate-300">\{entries.length\} dage</span>\
+                        </div>\
+                        \
+                        \{entries.length === 0 ? (\
+                            <div className="bg-white/50 border-2 border-dashed border-slate-200 rounded-3xl p-10 text-center">\
+                                <p className="text-slate-400 font-bold text-sm">Ingen historik endnu</p>\
+                            </div>\
+                        ) : (\
+                            <div className="space-y-3">\
+                                \{entries.map(entry => (\
+                                    <div key=\{entry.id\} className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex justify-between items-center group hover:border-emerald-100 transition-all">\
+                                        <div className="flex items-center gap-4">\
+                                            <div className=\{`w-10 h-10 rounded-full flex items-center justify-center font-black text-xs $\{entry.saved >= 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'\}`\}>\
+                                                \{entry.saved >= 0 ? '\uc0\u10003 ' : '!'\}\
+                                            </div>\
+                                            <div>\
+                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">\
+                                                    \{entry.date.toLocaleDateString('da-DK', \{weekday:'short', day:'numeric', month:'short', year: 'numeric'\})\}\
+                                                </p>\
+                                                <div className="flex items-baseline gap-2">\
+                                                    <p className=\{`font-bold text-lg $\{entry.saved >= 0 ? 'text-emerald-600' : 'text-rose-600'\}`\}>\
+                                                        \{entry.saved > 0 ? '+' : ''\}\{entry.saved.toFixed(0)\} kr.\
+                                                    </p>\
+                                                    <span className="text-[10px] text-slate-300 font-bold">Brugt: \{entry.spent\} kr.</span>\
+                                                </div>\
+                                            </div>\
+                                        </div>\
+                                        <button \
+                                            onClick=\{() => removeEntry(entry.id)\} \
+                                            className="text-slate-200 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100 p-2"\
+                                        >\
+                                            <i data-lucide="trash-2" className="w-5 h-5"></i>\
+                                        </button>\
+                                    </div>\
+                                ))\}\
+                            </div>\
+                        )\}\
+                    </div>\
+\
+                    \{toast && (\
+                        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-8 py-4 rounded-2xl font-black text-xs tracking-widest shadow-2xl animate-in fade-in slide-in-from-bottom-4 z-50">\
+                            \{toast.toUpperCase()\}\
+                        </div>\
+                    )\}\
+                </div>\
+            );\
+        \}\
+\
+        const root = ReactDOM.createRoot(document.getElementById('root'));\
+        root.render(<App />);\
+        \
+        // Initialisering af ikoner\
+        window.addEventListener('load', () => lucide.createIcons());\
+    </script>\
+</body>\
+</html>}
